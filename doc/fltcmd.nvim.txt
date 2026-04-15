@@ -1,0 +1,235 @@
+    *fltcmd.nvim.txt				Create user commands easily
+
+
+A basic library to create cli-like callable objects that can be used as
+|user-commands| commands, with completion included.
+
+The library can do the following:
+- Adapt functions into command to parameter relations.
+- Create user command from created command.
+- Create |command-completion-customlist| completion functions from command.
+- Allows programatic edition of arguments before execution.
+
+
+==============================================================================
+API							     *fltcmd.nvim-api*
+
+OBJECTS
+
+*fltcmd.def*
+    A table that maps arguments, options and flags to a definition. Completion
+    is defined for the key values. Numeric and boolean values do not
+    autocomplete.
+
+    Fields ~
+      • {string}  Defines a command, flag, option or argument:
+		    • (`boolean`) Defines a flag that can be set once.
+		    • (`integer`) Defines a flag that can be set multiple times.
+		    • (`fltcmd.comp`) Defines an option. See |fltcmd.comp|.
+		    • (`fltcmd.command`) Defines a command; consumes the rest
+		      of the argument list. See |fltcmd.command|.
+		    • (`'...'`) Defines the last argument as variadic.
+      • {integer} Defines positional arguments:
+		    • (`ltcmd.comp`) Defines an argument. See |fltcmd.comp|.
+		    • (`'...'`) makes the last positional argument variadic.
+
+*fltcmd.cmddef*
+    A table that maps names to subcommands. Completion is created based on the
+    commands used. Requires at least one command definition.
+
+    Fields ~
+      • {string}  (`fltcmd.command`) Defines a command. See |fltcmd.command|.
+
+*fltcmd.comp*
+    Completion function with the following signature:
+    `fun(lead: string, cmdline: string, cursorpos: integer): string[]`
+
+    See |command-completion-customlist|.
+
+*fltcmd.command*
+    A command line-like callable object.
+
+    The object expects a string argument list as parameter, with the first
+    element being the "command name", and the rest its arguments.
+
+    See |fltcmd.command()|.
+
+fltcmd.command({self}, {args}, {opts})			    *fltcmd.command()*
+    Invokes the command.
+
+    Parameters: ~
+      • {self} (`fltcmd.command`) The command itself.
+      • {args} (`string[]`) The list of arguments to process. The first value
+	       must exist and is treated as the current command name.
+      • {opts} (`vim.api.keyset.create_user_command.command_args?`) If called
+	       from |user-commands| command, the {opts} table. See
+	       |nvim_create_user_command()|.
+
+*fltcmd.injector*
+    An object that allows parameters values to be named and use that name to
+    replace the value in a command line or inject it if is missing.
+
+    Fields: ~
+      • {process} (`fun(cmdline: string[]): fltcmd.injectable_result`) See
+		  |injector.process()|.
+
+injector.process({cmdline})				  *injector.process()*
+    Processes the {cmdline} to get possible argument replacements.
+
+    Parameters: ~
+      • {cmdline}  (`string[]`) the command line arguments to check.
+
+    Return: ~
+      (`fltcmd.injectable_result`) the result of processing the commandline.
+      See |fltcmd.injectable_result|.
+
+*fltcmd.injectable_result*
+
+    Fields: ~
+      • {cmdline}  (`string[]`) The processed command line arguments.
+      • {existing} (`table<integer, string>`) Maps value keys from {valmap} to
+		   the values in command line if found.
+      • {missing}  (`table`) Opaque value that holds information to enable
+		   value injection.
+      • {inject}   (`fun(self: fltcmd.injectable_result, values: table<string, string>): string[]`)
+		   See |injectable_result:inject()|.
+
+injectable_result:inject({values})		  *injectable_result:inject()*
+    Updates the command line used to create this object with the values from
+    {valus} table.
+
+    Parameters: ~
+      • {values}  (`table<string, string>`) Maps value keys of {valmap} to the
+		  values to use in the command line.
+
+    Return: ~
+	(`string[]`) The updated command line.
+
+COMMAND API
+
+new_command({fn}, {def})				*fltcmd.new_command()*
+    Creates a new command object with the specified command definition.
+
+    Parameters ~
+      • {fn}   (`fun(self: fltcmd.command, args: string[], opts: vim.api.keyset.create_user_command.command_args?)`)
+	       Command function. See |fltcmd.command()|.
+      • {def}  (`fltcmd.def`) Command argument definition. See |fltcmd.def|.
+
+    Overloads: ~
+      • `fun(def: fltcmd.basedef): fltcmd.command`
+    
+    Return: ~
+	(`fltcmd.command`) See |fltcmd.command|.
+	
+create_user_command({name}, {cmd}, {opts})	*fltcmd.create_user_command()*
+    Creates an |user-commands| command that calls the specified {cmd}.
+
+    Parameters: ~
+      • {name} (`string`) Name of the new user command. See
+	       |nvim_create_user_command()|.
+      • {cmd}  (`fltcmd.command`) Command to execute. <f-args> is passed as
+	       {args}, and the {opts} table as is. See |fltcmd.command()|.
+      • {opts} (`vim.api.keyset.user_command`) Optional flags. See
+	       |nvim_create_user_command()|.
+      
+create_completer({cmd})				   *fltcmd.create_completer()*
+    Creates an |command-completion-customlist| function for the specified
+    command.
+
+    Parameters: ~
+      • {cmd}  (`fltcmd.command`) Command to create the completer from.
+
+    Return: ~
+	(`fltcmd.comp`) Customlist completion function. See |fltcmd.comp|.
+
+create_injector({cmd}, {valmap})		    *fltcmd.create_injector()*
+    Creates an injector object that allows the replacement of parameters
+    before command execution.
+
+    Parameters: ~
+      • {cmd}	 (`fltcmd.command`) Command to create the injector from.
+      • {valmap} (`table<string|integer, string>`) Map parameter names or
+		 positions to value keys to replace or inject later.
+
+    Return: ~
+	(`fltcmd.injector`) injector object. See |fltcmd.injector|.
+
+HELPERS							 *fltcmd.nvim-helpers*
+
+process_args({cmd}, {args})			       *fltcmd.process_args()*
+    Processes the argument list for the specfied command and returns a table 
+    that maps command option to valuei, `true` or the amount of times it was
+    found.
+
+    If the processing finds a subcommand it stops there, and creates a special
+    function that will pass the rest of the argument list to it.
+
+    Parameters: ~
+      • {cmd}  (`fltcmd.command`) The command to process the
+	       arguments against
+      • {args} (`string[]`) The command line arguments. It is expected that the
+	       first element is the current command name
+
+    Return: ~
+	(`table`) a table with the found arguments
+
+COMPLETION HELPERS			      *fltcmd.nvim-completion-helpers*
+
+any()							        *fltcmd.any()*
+    Completes to an empty list.
+    Useful to mark entries that require unknown input.
+
+    Pass this function as-is.
+
+    Example: >lua
+	local echofn = function(cmd, args)
+	    args = fltcmd.process_args(cmd, args)
+	    print(table.concat(args, ' ')
+	end
+	local echo = fltcmd.new_command(echofn, { ['...'] = fltcmd.any })
+
+	echo({'echo', 'hello', 'world'}) -- will print "hello world"
+<
+    Return: ~
+	`(table)` empty table.
+
+choiceof({values})					   *fltcmd.choiceof()*
+    Creates a completion source from a list of specific values.
+
+    Example: >lua
+	local selector = fltcmd.new_command(function(self, args)
+	    args = fltcmd.process_args(self, args)
+	    print(args[1])
+	end, { fltcmd.choiceof({'help', 'with', 'examples'}) })
+
+	local choices = fltcmd.create_completer(selector)('', 'select ', 7)
+	vim.print(choices) -- will print { 'help', 'with', 'examples' }
+<
+    Parameters: ~
+      • {values}  (`any[]`) A list of values to complete from.
+
+    Return: ~
+	(`fltcmd.comp`) Customlist completion function. See |fltcmd.comp|.
+
+getcompletion({type})				      *fltcmd.getcompletion()*
+    Creates a completion source using |getcompletion()| function.
+
+    Example: >lua
+	local comp = fltcmd.new_command(function(self, args)
+	    args = fltcmd.process_args(self, args)
+	    print(args[1])
+	end, { fltcmd.getcompletion('option') })
+
+	-- get options that start with 'nu'
+	local opts = fltcmd.create_completer(comp)('nu', 'opt nu', 6)
+	vim.print(opts) -- will print { 'number', 'numberwidth' }
+<
+
+    Parameters: ~
+      • {type}  (`string`) See |getcompletion()|'s {type}.
+
+    Return: ~
+	(`fltcmd.comp`) Customlist completion function. See |fltcmd.comp|.
+
+
+ vim:tw=78:isk=!-~,^*,^\|,^\":ts=8:noet:ft=help:norl:
