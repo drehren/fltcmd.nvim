@@ -112,11 +112,9 @@ describe('commands', function()
 	end)
 
 	it('check completion', function()
+		local noop = function() end
 		local c = fltcmd.new_command({
-			testa = fltcmd.new_command(function(self, args)
-				args = fltcmd.process_args(self, args)
-				vim.print(args)
-			end, {
+			testa = fltcmd.new_command(noop, {
 				['-c'] = fltcmd.getcompletion('file'),
 				['-f'] = function(pat)
 					local res = {}
@@ -129,28 +127,20 @@ describe('commands', function()
 				fltcmd.choiceof({ 'cc', 'cccc' }),
 				fltcmd.getcompletion('file'),
 			}),
-			testb = fltcmd.new_command(function(_, args)
-				print('tb:', vim.inspect(args))
-			end, { fltcmd.choiceof({ 'aaa', 'bbb', 'ccc', 'ddd' }), '...' }),
-			testc = fltcmd.new_command({
-				more = fltcmd.new_command(function()
-					print('moar')
-				end),
-			}),
-			testd = fltcmd.new_command(function(_, args)
-				print('td:', vim.inspect(args))
-			end, { ['...'] = fltcmd.choiceof({ 'ddd', 'fff', 'eee' }) }),
-			testf = fltcmd.new_command(function(tf, args)
-				local pargs = fltcmd.process_args(tf, args)
-				print('tf:', vim.inspect(args))
-				if pargs.subcmd1 then
-					-- use pargs as it will take care of starting from the correct position
-					pargs.subcmd1(args)
-				end
-			end, {
-				subcmd1 = fltcmd.new_command(function(_, args)
-					print('subcmd:', vim.inspect(args))
-				end, { ['-s'] = fltcmd.choiceof({ 'one', 'two', 'three' }) }),
+			testb = fltcmd.new_command(
+				noop,
+				{ fltcmd.choiceof({ 'aaa', 'bbb', 'ccc', 'ddd' }), '...' }
+			),
+			testc = fltcmd.new_command({ more = fltcmd.new_command(noop) }),
+			testd = fltcmd.new_command(
+				noop,
+				{ ['...'] = fltcmd.choiceof({ 'ddd', 'fff', 'eee' }) }
+			),
+			testf = fltcmd.new_command(noop, {
+				subcmd1 = fltcmd.new_command(
+					noop,
+					{ ['-s'] = fltcmd.choiceof({ 'one', 'two', 'three' }) }
+				),
 			}),
 		})
 
