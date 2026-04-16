@@ -50,18 +50,6 @@ end
 local C = {}
 C.__index = C
 
----@param args string[]
-local function dispatch_cmd(self, args)
-	vim.validate('args', args, 'table')
-
-	if not args[2] then
-		error('no command given')
-	end
-	local cmd = args[2]
-	table.remove(args, 1)
-	return assert(self[cmd], 'unknown command "' .. cmd .. '"')(args)
-end
-
 local function is_def(v)
 	if type(v) == 'table' then
 		local mt = getmetatable(v)
@@ -76,48 +64,40 @@ end
 local M = {}
 
 local ctxcache = setmetatable({}, { __mode = 'k' })
----@param def fltcmd.command
-local function new_ctx(def)
-	if ctxcache[def] then
-		return ctxcache[def]
+---@param cmd fltcmd.command
+local function new_ctx(cmd)
+	if ctxcache[cmd] then
+		return ctxcache[cmd]
 	end
 
 	local cmdlist = {}
 	local compdef = {}
+	local maxargs = table.maxn(cmd)
 
-	for k, v in pairs(def) do
+	for k, v in pairs(cmd) do
 		if type(k) == 'string' then
 			if k ~= '...' then
 				cmdlist[#cmdlist + 1] = k
 			else
-				compdef[table.maxn(def) + 1] = v
+				compdef[maxargs + 1] = v
 			end
 		end
+
+		if v == '...' then
+			if k > 1 then
+				v = cmd[k - 1]
+			else
+				v = M.any
+			end
+			k = '...'
+			maxargs = math.huge
+		end
+
 		local vtype = type(v)
 		if vtype == 'function' then
 			compdef[k] = v
-		elseif v == '...' then
-			local prek = table.maxn(def)
-			if prek == k and k > 1 then
-				prek = prek - 1
-			end
-			v = def[prek]
-			if v == '...' then
-				compdef[k] = M.any
-			elseif type(v) == 'function' then
-				compdef[k] = v
-			else
-				error(
-					'variadic parameter completer fail: v is ' .. vim.inspect(v),
-					3
-				)
-			end
 		elseif vtype == 'table' then
-			if is_def(v) then
-				compdef[k] = new_ctx(v)
-			else
-				error('parameter completer not a definition', 3)
-			end
+			compdef[k] = new_ctx(v)
 		elseif vtype ~= 'boolean' and vtype ~= 'number' then
 			error('parameter completer is not a function', 3)
 		end
@@ -129,7 +109,7 @@ local function new_ctx(def)
 	local _CMP = {}
 	function _CMP:__call(lead, arg, pos, what)
 		if what == true then
-			return #self
+			return maxargs
 		end
 		if type(what) == 'string' then
 			if vim.startswith(what, '-') then
@@ -178,53 +158,53 @@ local function new_ctx(def)
 		return candidates
 	end
 
-	ctxcache[def] = setmetatable(compdef, _CMP)
-	return ctxcache[def]
+	ctxcache[cmd] = setmetatable(compdef, _CMP)
+	return ctxcache[cmd]
 end
 
 local completercache = setmetatable({}, { __mode = 'k' })
 
 --- Creates an customlist function from the specified command.
----@param def fltcmd.command the command
+---@param cmd fltcmd.command the command
 ---@return fun(lead: string, cmdline: string, cursorpos: integer):string[]
-function M.create_completer(def)
-	if completercache[def] then
-		return completercache[def]
+function M.create_completer(cmd)
+	if completercache[cmd] then
+		return completercache[cmd]
 	end
 
-	local ctx = new_ctx(def)
+	local ctx = new_ctx(cmd)
 
-	completercache[def] = function(lead, cmdline, cursorpos)
+	completercache[cmd] = function(lead, cmdline, cursorpos)
 		local cmdargs = split(cmdline, cursorpos)
 		cmdargs[#cmdargs] = nil
 
-		local cmd = ctx
-		local maxarg = cmd(nil, nil, nil, true)
+		local comp = ctx
+		local maxarg = comp(nil, nil, nil, true)
 		local posarg = math.min(1, maxarg)
 		local lastc
-		for i = 2, #cmdargs do
+		for i = 1, #cmdargs do
 			local p = cmdargs[i]
-			local c = cmd[p]
+			local c = comp[p]
 			if type(c) == 'table' then
-				cmd = c
+				comp = c
 				lastc = c
-				maxarg = cmd(nil, nil, nil, true)
+				maxarg = comp(nil, nil, nil, true)
 				posarg = math.min(1, maxarg)
 			elseif c then
 				lastc = p
-			elseif not cmd(nil, nil, nil, p) then
-				if lastc ~= cmd then
-					lastc = cmd
+			elseif not comp(nil, nil, nil, p) then
+				if lastc ~= comp then
+					lastc = comp
 				else
 					posarg = posarg + 1
 				end
 			end
 		end
 
-		return cmd(lead, lastc, posarg)
+		return comp(lead, lastc, posarg)
 	end
 
-	return completercache[def]
+	return completercache[cmd]
 end
 
 ---@class fltcmd.valmap
@@ -261,11 +241,11 @@ function IR:inject(values)
 	return self.cmdline
 end
 
----@param def fltcmd.command
+---@param cmd fltcmd.command
 ---@param valmap fltcmd.valmap
 ---@return fltcmd.injector
-function M.create_injector(def, valmap)
-	local ctx = new_ctx(def)
+function M.create_injector(cmd, valmap)
+	local ctx = new_ctx(cmd)
 
 	local inj = {}
 
@@ -280,7 +260,7 @@ function M.create_injector(def, valmap)
 		}
 		setmetatable(res, IR)
 
-		local injcmd = valmap[cmdline[2]]
+		local injcmd = valmap[cmdline[1]]
 		if not injcmd then
 			return res
 		end
@@ -288,14 +268,14 @@ function M.create_injector(def, valmap)
 		injcmd = vim.deepcopy(injcmd)
 
 		-- seek where to inject the values
-		local cmd = ctx
+		local comp = ctx
 		local argi = 1
 		local posarg = false
-		for i = 2, #cmdline do
+		for i = 1, #cmdline do
 			local p = cmdline[i]
-			local c = cmd[p]
+			local c = comp[p]
 			if type(c) == 'table' then
-				cmd = c
+				comp = c
 				argi = 1
 				posarg = false
 			elseif c then
@@ -303,7 +283,7 @@ function M.create_injector(def, valmap)
 				if injcmd[p] then
 					table.insert(res.missing, { i + 1, injcmd[p] })
 				end
-			elseif not cmd(nil, nil, nil, p) then
+			elseif not comp(nil, nil, nil, p) then
 				if posarg then
 					posarg = false
 					local lastp = cmdline[i - 1]
@@ -340,10 +320,21 @@ function M.create_injector(def, valmap)
 	return inj
 end
 
+---@param args string[]
+local function dispatch_cmd(self, args)
+	vim.validate('args', args, 'table')
+
+	if not args[1] then
+		error('no command given')
+	end
+	local cmd = table.remove(args, 1)
+	return assert(self[cmd], 'unknown command "' .. cmd .. '"')(args)
+end
+
 --- Creates a new command
 ---@param fn fun(self: fltcmd.command, args: string[], opts?: vim.api.keyset.create_user_command.command_args)
 ---@param def? fltcmd.def
----@overload fun(definition: fltcmd.basedef): fltcmd.command
+---@overload fun(def: fltcmd.basedef): fltcmd.command
 ---@return fltcmd.command
 function M.new_command(fn, def)
 	if not vim.is_callable(fn) and not def then
@@ -381,34 +372,34 @@ end
 ---
 --- If the processing find a subcommand it stops there, and creates a special
 --- function that will pass the rest of the argument list.
----@param def fltcmd.command
+---@param cmd fltcmd.command
 ---@param args string[]
 ---@return table<string|integer, boolean|number|function>
-function M.process_args(def, args)
+function M.process_args(cmd, args)
 	local pargs = {}
-	local i = 2
+	local i = 1
 	while i <= #args do
 		local v = args[i]
 		i = i + 1
-		local dvt = type(def[v])
+		local dvt = type(cmd[v])
 		if dvt == 'string' or dvt == 'function' then
 			pargs[v] = args[i]
 			if pargs[v] then
 				i = i + 1
 			end
 		elseif dvt == 'table' then
-			if is_def(def[v]) then
+			if is_def(cmd[v]) then
 				pargs[v] = function(subargs)
 					assert(subargs == args)
-					subargs = vim.list_slice(subargs, i - 1)
-					def[v](subargs)
+					subargs = vim.list_slice(subargs, i)
+					cmd[v](subargs)
 				end
 				break
 			else
-				pargs[v] = def[v]
+				pargs[v] = cmd[v]
 			end
 		elseif dvt == 'number' then
-			pargs[v] = math.min((pargs[v] or 0) + 1, def[v])
+			pargs[v] = math.min((pargs[v] or 0) + 1, cmd[v])
 		elseif dvt == 'boolean' then
 			pargs[v] = true
 		else

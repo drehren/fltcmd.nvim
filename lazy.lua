@@ -1,1 +1,1 @@
-return { 'drehren/fltcmd.nvim' }
+return { 'drehren/fltcmd.nvim', lazy = true }

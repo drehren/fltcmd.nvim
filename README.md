@@ -36,12 +36,8 @@ local command1 = fltcmd.new_command(my_command, {
     subcmd = subcmd, -- commands can call other commands
 })
 
--- use like cmd command list, argv[1] must be command name
---        argv[1]       argv[2]     argv[3]
-command1({'command1', '--file', 'myfile.txt'})
-
--- argv[1] can be any string, but it must exist
-command1({'mycmd', 'subcmd', '1'})
+command1({'--file', 'myfile.txt'})
+command1({'subcmd', '1'})
 ```
 
 - If there is no need to handle the initial command just pass the definition
@@ -61,9 +57,9 @@ local cmdd = fltcmd.new_command({
 
 -- call
 
-cmdd({'d', 'cmd1', ...}) -- will end up calling cmd1
-cmdd({'d', 'cmd2', ...}) -- will end up calling cmd2
-cmdd({'d', 'cmd3', ...}) -- will end up calling cmd3
+cmdd({'cmd1', ...}) -- will end up calling cmd1
+cmdd({'cmd2', ...}) -- will end up calling cmd2
+cmdd({'cmd3', ...}) -- will end up calling cmd3
 ```
 
 ### Creating a user command

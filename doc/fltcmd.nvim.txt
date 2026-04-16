@@ -49,18 +49,14 @@ OBJECTS
 *fltcmd.command*
     A command line-like callable object.
 
-    The object expects a string argument list as parameter, with the first
-    element being the "command name", and the rest its arguments.
-
-    See |fltcmd.command()|.
+    The object expects a string argument list as parameter. See |fltcmd.command()|.
 
 fltcmd.command({self}, {args}, {opts})			    *fltcmd.command()*
     Invokes the command.
 
     Parameters: ~
       • {self} (`fltcmd.command`) The command itself.
-      • {args} (`string[]`) The list of arguments to process. The first value
-	       must exist and is treated as the current command name.
+      • {args} (`string[]`) The list of arguments to process.
       • {opts} (`vim.api.keyset.create_user_command.command_args?`) If called
 	       from |user-commands| command, the {opts} table. See
 	       |nvim_create_user_command()|.
@@ -154,6 +150,7 @@ create_injector({cmd}, {valmap})		    *fltcmd.create_injector()*
     Return: ~
 	(`fltcmd.injector`) injector object. See |fltcmd.injector|.
 
+
 HELPERS							 *fltcmd.nvim-helpers*
 
 process_args({cmd}, {args})			       *fltcmd.process_args()*
@@ -165,13 +162,12 @@ process_args({cmd}, {args})			       *fltcmd.process_args()*
     function that will pass the rest of the argument list to it.
 
     Parameters: ~
-      • {cmd}  (`fltcmd.command`) The command to process the
-	       arguments against
-      • {args} (`string[]`) The command line arguments. It is expected that the
-	       first element is the current command name
+      • {cmd}  (`fltcmd.command`) The command to process the arguments against.
+      • {args} (`string[]`) The command line arguments.
 
     Return: ~
 	(`table`) a table with the found arguments
+
 
 COMPLETION HELPERS			      *fltcmd.nvim-completion-helpers*
 
