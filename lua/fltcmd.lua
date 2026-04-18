@@ -1,13 +1,17 @@
 local bslash = string.byte('\\')
+local space = string.byte(' ')
 
----@param cmdline string
----@param _end? integer
-local function split(cmdline, _end)
-	_end = _end or #cmdline
-	cmdline = cmdline:sub(1, _end)
+--- Splits the line by non-escaped space, last item may be empty
+---@param line string Line to split
+---@param _end? integer End byte to accout for split
+local function split(line, _end)
+	_end = _end or #line
+	if line:byte(_end) == bslash and line:byte(_end + 1) == space then
+		_end = _end + 1
+	end
 	local p = 1
 	do
-		local s, e = cmdline:find('%s+')
+		local s, e = line:find('%s+')
 		if s == 1 then
 			p = e + 1
 		end
@@ -16,39 +20,34 @@ local function split(cmdline, _end)
 	local ln = {}
 	repeat
 		l = l + 1
-		local s, e = cmdline:find('%s+', l)
+		local s, e = line:find('%s+', l)
 		if s then
-			if cmdline:byte(s - 1) == bslash then
+			if line:byte(s - 1) == bslash then
 				s = s + 1
 			end
 			if s <= e then
-				ln[#ln + 1] = cmdline:sub(p, s - 1)
+				if _end < s then
+					ln[#ln + 1] = line:sub(p, _end)
+					return ln
+				end
+				ln[#ln + 1] = line:sub(p, s - 1)
 				p = e + 1
 			end
 		end
 		---@diagnostic disable-next-line: cast-local-type
 		l = e
-	until s == nil or e >= _end
-	ln[#ln + 1] = cmdline:sub(p)
+	until s == nil or p > _end
+	ln[#ln + 1] = line:sub(p, _end)
 	return ln
 end
 
--- Command completion
-
----@alias fltcmd.comp fun(lead: string, cmdline: string, pos: integer):string[]
-
----@class fltcmd.basedef
----@field [string] fltcmd.command
-
----@class fltcmd.def : fltcmd.basedef
----@field [integer] fltcmd.comp|'...'
----@field [string] fltcmd.command|fltcmd.comp|boolean|integer
-
 --- Represents a single command
 ---@class fltcmd.command
----@operator call(string[]):any
 local C = {}
-C.__index = C
+
+--- Represents a collection of flags for a command
+---@class fltcmd.flags
+local F = {}
 
 local function is_def(v)
 	if type(v) == 'table' then
@@ -57,6 +56,17 @@ local function is_def(v)
 			mt = getmetatable(mt)
 		end
 		return mt == C
+	end
+	return false
+end
+
+local function is_flags(v)
+	if type(v) == 'table' then
+		local mt = getmetatable(v)
+		while mt and mt ~= F do
+			mt = getmetatable(mt)
+		end
+		return mt == F
 	end
 	return false
 end
@@ -73,6 +83,9 @@ local function new_ctx(cmd)
 	local cmdlist = {}
 	local compdef = {}
 	local maxargs = table.maxn(cmd)
+
+	---@type [integer, string[]][]
+	local flags = {}
 
 	for k, v in pairs(cmd) do
 		if type(k) == 'string' then
@@ -97,9 +110,28 @@ local function new_ctx(cmd)
 		if vtype == 'function' then
 			compdef[k] = v
 		elseif vtype == 'table' then
-			compdef[k] = new_ctx(v)
+			if is_flags(v) then
+				for _, f in ipairs(v) do
+					cmdlist[#cmdlist + 1] = f
+					compdef[f] = true
+				end
+				---@cast k integer
+				flags[#flags + 1] = { k, v }
+			else
+				compdef[k] = new_ctx(v)
+			end
 		elseif vtype ~= 'boolean' and vtype ~= 'number' then
 			error('parameter completer is not a function', 3)
+		end
+	end
+
+	table.sort(flags, function(a, b)
+		return a[1] > b[1]
+	end)
+	for _, fls in ipairs(flags) do
+		table.remove(cmd, fls[1])
+		for _, f in ipairs(fls[2]) do
+			cmd[f] = true
 		end
 	end
 
@@ -164,9 +196,9 @@ end
 
 local completercache = setmetatable({}, { __mode = 'k' })
 
---- Creates an customlist function from the specified command.
----@param cmd fltcmd.command the command
----@return fun(lead: string, cmdline: string, cursorpos: integer):string[]
+--- Creates an command completion customlist function from the specified command.
+---@param cmd fltcmd.command A command to create the completion from
+---@return fltcmd.comp completer Completion function
 function M.create_completer(cmd)
 	if completercache[cmd] then
 		return completercache[cmd]
@@ -207,16 +239,7 @@ function M.create_completer(cmd)
 	return completercache[cmd]
 end
 
----@class fltcmd.valmap
----@field [string] table<string|integer, string>
-
----@class fltcmd.injector
----@field process fun(cmdline:string[]): fltcmd.injector_result
-
 ---@class fltcmd.injector_result
----@field cmdline string[]
----@field existing table<string, string>
----@field missing table
 local IR = {}
 IR.__index = {}
 
@@ -241,9 +264,11 @@ function IR:inject(values)
 	return self.cmdline
 end
 
----@param cmd fltcmd.command
----@param valmap fltcmd.valmap
----@return fltcmd.injector
+--- Creates an injector object that can process a command line to extract
+--- existing values and inject new ones to the specified options.
+---@param cmd fltcmd.command Command to use.
+---@param valmap fltcmd.valmap Value map to define option values.
+---@return fltcmd.injector injector Injector object.
 function M.create_injector(cmd, valmap)
 	local ctx = new_ctx(cmd)
 
@@ -333,7 +358,7 @@ end
 
 --- Creates a new command
 ---@param fn fun(self: fltcmd.command, args: string[], opts?: vim.api.keyset.create_user_command.command_args)
----@param def? fltcmd.def
+---@param def? fltcmd.def Command definition
 ---@overload fun(def: fltcmd.basedef): fltcmd.command
 ---@return fltcmd.command
 function M.new_command(fn, def)
@@ -402,7 +427,7 @@ function M.process_args(cmd, args)
 			pargs[v] = math.min((pargs[v] or 0) + 1, cmd[v])
 		elseif dvt == 'boolean' then
 			pargs[v] = true
-		else
+		elseif cmd[#pargs + 1] or cmd['...'] then
 			pargs[#pargs + 1] = v
 		end
 	end
@@ -410,9 +435,10 @@ function M.process_args(cmd, args)
 	return pargs
 end
 
----@param cmd fltcmd.command
----@param name string
----@param opts? vim.api.keyset.user_command
+--- Creates an `user-commands` comamnd that calls `cmd`
+---@param name string Name of the new command.
+---@param cmd fltcmd.command Command to execute.
+---@param opts? vim.api.keyset.user_command Optional flags
 function M.create_user_command(name, cmd, opts)
 	opts = opts or {}
 	if next(cmd) then
@@ -433,60 +459,27 @@ function M.any()
 	return {}
 end
 
---- Creates a completion source from a list of specific values.
----@param values any[]
+--- Creates a completion source from a list of specific values or a function
+--- that generates one.
+---@param values any[] Available values.
+---@overload fun(fn: fun():any[]):fun(lead:string):string[]
 ---@return fun(lead:string):string[]
 function M.choiceof(values)
-	return function(lead)
-		return vim.tbl_filter(function(v)
-			return vim.startswith(tostring(v), lead)
-		end, values)
+	vim.validate('values_or_function', values, { 'table', 'callable' })
+	if vim.is_callable(values) then
+		return function(lead)
+			return vim.tbl_filter(function(v)
+				return vim.startswith(tostring(v), lead)
+			end, values())
+		end
+	else
+		return function(lead)
+			return vim.tbl_filter(function(v)
+				return vim.startswith(tostring(v), lead)
+			end, values)
+		end
 	end
 end
-
----@alias fltcmd.getcompletion.type
---- | 'arglist'
---- | 'augroup'
---- | 'buffer'
---- | 'breakpoint'
---- | 'cmdline'
---- | 'color'
---- | 'command'
---- | 'compiler'
---- | 'diff_buffer'
---- | 'dir'
---- | 'dir_in_path'
---- | 'environment'
---- | 'event'
---- | 'expression'
---- | 'file'
---- | 'file_in_path'
---- | 'filetype'
---- | 'filetypecmd'
---- | 'function'
---- | 'help'
---- | 'highlight'
---- | 'history'
---- | 'keymap'
---- | 'locale'
---- | 'mapclear'
---- | 'mapping'
---- | 'menu'
---- | 'messages'
---- | 'option'
---- | 'packadd'
---- | 'retab'
---- | 'runtime'
---- | 'scriptnames'
---- | 'shellcmd'
---- | 'shellcmdline'
---- | 'sign'
---- | 'syntax'
---- | 'syntime'
---- | 'tag'
---- | 'tag_listfiles'
---- | 'user'
---- | 'var'
 
 local getcomp = vim.fn.getcompletion
 
@@ -498,5 +491,15 @@ function M.getcompletion(type)
 		return getcomp(lead, type, true)
 	end
 end
+
+--- Defines flags (non-valued options) for command
+---@param flags string[]
+---@return fltcmd.flags
+function M.flags(flags)
+	vim.validate('flags', flags, 'table')
+	return setmetatable(flags, F)
+end
+
+M.splitline = split
 
 return M

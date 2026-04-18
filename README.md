@@ -8,7 +8,7 @@ lua functions or doing cli tools mapping to vim user commands.
 
 ## Usage
 
-- Create a command, that can call another command:
+Create a command, that can call another command:
 ```lua
 local fltcmd = require('fltcmd')
 
@@ -40,7 +40,7 @@ command1({'--file', 'myfile.txt'})
 command1({'subcmd', '1'})
 ```
 
-- If there is no need to handle the initial command just pass the definition
+If there is no need to handle the initial command just pass the definition
 as the first parameter:
 ```lua
 local fltcmd = require('fltcmd')
@@ -77,6 +77,21 @@ local cmd = fltcmd.new_command({ ... })
 fltcmd.create_user_command('MyCmd', cmd, { desc = 'my command' })
 ```
 
+### Create a completer
+
+To create a `command-completion-customlist` function, pass an existing command
+object or a table describing the completion.
+
+```lua
+local fltcmd = require('fltcmd')
+
+local cccl = fltcmd.create_completer({
+    fltcmd.flags({'-v', '-h', '--help', '-f'}),
+    cmd1 = fltcmd.any,
+    fltcmd.choiceof({'00', '01', '10', '11'}),
+})
+```
+
 ## Requirements
 
 - neovim >= 0.11.0
@@ -101,10 +116,5 @@ use "drehren/fltcmd.nvim"
 
 - Use [lazy.nvim](https://github.com/folke/lazy.nvim)
 ```lua
-return {
-    "drehren/fltcmd.nvim",
-    opts = {},
-}
+return { "drehren/fltcmd.nvim" }
 ```
-
-

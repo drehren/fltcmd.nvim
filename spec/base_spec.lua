@@ -2,6 +2,7 @@
 ---@module "busted"
 
 describe('commands', function()
+	---@module 'fltcmd'
 	local fltcmd
 
 	setup(function()
@@ -109,12 +110,40 @@ describe('commands', function()
 		assert.same({ ['--file'] = 'a.txt' }, c({ '--file', 'a.txt' }))
 		assert.same({ ['-v'] = 2 }, c({ '-v', '-v' }))
 		assert.same({ ['-r'] = true }, c({ '-r', '-r' }))
+		assert.same({ ['-r'] = true }, c({ '-r', '-r', 'arg' }))
+	end)
+
+	it('split line', function()
+		assert.same({ 'hello', 'world' }, fltcmd.splitline('hello world'))
+		assert.same({ 'hello\\ ', 'world' }, fltcmd.splitline('hello\\  world'))
+
+		--                    1         2         3 3
+		--           1        0         0         0 2
+		local ln = [[hello\ to\ all  how is it going?]]
+
+		local getlast = function(l, n)
+			local r = fltcmd.splitline(l, n)
+			return r[#r]
+		end
+
+		assert.same('h', getlast(ln, 1))
+		assert.same('hello\\ ', getlast(ln, 6))
+		assert.same('hello', getlast(ln, 5))
+		assert.same('hell', getlast(ln, 4))
+		assert.same('ho', getlast(ln, 18))
+		assert.same('go', getlast(ln, 28))
+		assert.same('going?', getlast(ln, 33))
+		assert.same('', getlast(ln, 15))
+		assert.same('', getlast(ln, 20))
+		assert.same('', getlast(ln, 26))
+		assert.same('', getlast('    ', 2))
+		assert.same('he', getlast('hello', 2))
+		assert.same('hell', getlast('hello', 4))
 	end)
 
 	it('check completion', function()
-		local noop = function() end
-		local c = fltcmd.new_command({
-			testa = fltcmd.new_command(noop, {
+		local c = fltcmd.create_completer({
+			testa = {
 				['-c'] = fltcmd.getcompletion('file'),
 				['-f'] = function(pat)
 					local res = {}
@@ -126,52 +155,61 @@ describe('commands', function()
 				fltcmd.choiceof({ 'aab', 'abb', 'abc' }),
 				fltcmd.choiceof({ 'cc', 'cccc' }),
 				fltcmd.getcompletion('file'),
-			}),
-			testb = fltcmd.new_command(
-				noop,
-				{ fltcmd.choiceof({ 'aaa', 'bbb', 'ccc', 'ddd' }), '...' }
-			),
-			testc = fltcmd.new_command({ more = fltcmd.new_command(noop) }),
-			testd = fltcmd.new_command(
-				noop,
-				{ ['...'] = fltcmd.choiceof({ 'ddd', 'fff', 'eee' }) }
-			),
-			testf = fltcmd.new_command(noop, {
-				subcmd1 = fltcmd.new_command(
-					noop,
-					{ ['-s'] = fltcmd.choiceof({ 'one', 'two', 'three' }) }
-				),
-			}),
+			},
+			testb = { fltcmd.choiceof({ 'aaa', 'bbb', 'ccc', 'ddd' }), '...' },
+			testc = { more = fltcmd.any },
+			testd = { ['...'] = fltcmd.choiceof({ 'ddd', 'fff', 'eee' }) },
+			testf = {
+				subcmd1 = {
+					['-s'] = fltcmd.choiceof({ 'one', 'two', 'three' }),
+				},
+			},
 		})
 
-		local comp = fltcmd.create_completer(c)
-		local function test_comp(l, line, p, expected)
-			assert.same(expected, comp(l, line, p))
+		local function comp(line)
+			local splt = fltcmd.splitline(line)
+			return c(splt[#splt], line, #line)
 		end
 
-		test_comp('', 'c ', 2, { 'testa', 'testb', 'testc', 'testd', 'testf' })
-		test_comp('testa', 'c testa', 7, { 'testa' })
-		test_comp('', 'c testa -f ', 11, { 'hello' })
-		test_comp('o', 'c testa -f o', 12, {})
-		test_comp('he', 'c testa -f he', 13, { 'hello' })
-		test_comp('a', 'c testa a', 9, { 'aab', 'abb', 'abc' })
-		test_comp('c', 'c testa a c', 11, { 'cc', 'cccc' })
-		test_comp(
-			'',
-			'c testa a c ',
-			12,
-			{ 'doc/', 'lazy.lua', 'LICENSE', 'lua/', 'README.md', 'spec/' }
+		assert.same({ 'testa', 'testb', 'testc', 'testd', 'testf' }, comp('c '))
+		assert.same({ 'testa' }, comp('c testa'))
+		assert.same({ 'hello' }, comp('c testa -f '))
+		assert.same({}, comp('c testa -f o'))
+		assert.same({ 'hello' }, comp('c testa -f he'))
+		assert.same({ 'aab', 'abb', 'abc' }, comp('c testa a'))
+		assert.same({ 'cc', 'cccc' }, comp('c testa a c'))
+		assert.same(
+			{ 'doc/', 'lazy.lua', 'LICENSE', 'lua/', 'README.md', 'spec/' },
+			comp('c testa a c ')
 		)
-		test_comp('m', 'c testc m', 9, { 'more' })
-		test_comp('-', 'c testa -', 9, { '-c', '-f' })
-		test_comp('', 'c testb ', 8, { 'aaa', 'bbb', 'ccc', 'ddd' })
-		test_comp('', 'c testb a ', 10, { 'aaa', 'bbb', 'ccc', 'ddd' })
-		test_comp('', 'c testd ', 8, { 'ddd', 'fff', 'eee' })
-		test_comp('', 'c testd a ', 10, { 'ddd', 'fff', 'eee' })
-		test_comp('', 'c testd a a ', 12, { 'ddd', 'fff', 'eee' })
-		test_comp('', 'c testf ', 8, { 'subcmd1' })
-		test_comp('s', 'c testf s', 9, { 'subcmd1' })
-		test_comp('-', 'c testf subcmd1 -', 17, { '-s' })
-		test_comp('', 'c testf subcmd1 -s ', 19, { 'one', 'two', 'three' })
+		assert.same({ 'more' }, comp('c testc m'))
+		assert.same({ '-c', '-f' }, comp('c testa -'))
+		assert.same({ 'aaa', 'bbb', 'ccc', 'ddd' }, comp('c testb '))
+		assert.same({ 'aaa', 'bbb', 'ccc', 'ddd' }, comp('c testb a '))
+		assert.same({ 'ddd', 'fff', 'eee' }, comp('c testd '))
+		assert.same({ 'ddd', 'fff', 'eee' }, comp('c testd a '))
+		assert.same({ 'ddd', 'fff', 'eee' }, comp('c testd a a '))
+		assert.same({ 'subcmd1' }, comp('c testf '))
+		assert.same({ 'subcmd1' }, comp('c testf s'))
+		assert.same({ '-s' }, comp('c testf subcmd1 -'))
+		assert.same({ 'one', 'two', 'three' }, comp('c testf subcmd1 -s '))
+	end)
+
+	it('completion in-between', function()
+		local c = fltcmd.create_completer({
+			fltcmd.flags({ '-v', '-f', '-r' }),
+			['-o'] = fltcmd.any,
+			fltcmd.any,
+			'...',
+		})
+		local function compl(str, pos)
+			local splt = fltcmd.splitline(str, pos)
+			return c(splt[#splt], str, pos or #str)
+		end
+
+		assert.same({ '-f', '-o', '-r', '-v' }, compl('c -'))
+		assert.same({ '-f', '-o', '-r', '-v' }, compl('c - data', 4))
+		assert.same({}, compl('c - data da'))
+		assert.same({ '-o' }, compl('c -o data', 4))
 	end)
 end)

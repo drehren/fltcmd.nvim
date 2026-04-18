@@ -46,6 +46,11 @@ OBJECTS
 
     See |command-completion-customlist|.
 
+*fltcmd.flags*
+    An object that contains flags for a command.
+
+    See |fltcmd.flags()|.
+
 *fltcmd.command*
     A command line-like callable object.
 
@@ -112,7 +117,9 @@ new_command({fn}, {def})				*fltcmd.new_command()*
       • {def}  (`fltcmd.def`) Command argument definition. See |fltcmd.def|.
 
     Overloads: ~
-      • `fun(def: fltcmd.basedef): fltcmd.command`
+      • `fun(def: fltcmd.basedef): fltcmd.command` Creates a new command from
+						 a subcommand-only command
+						 definition.
     
     Return: ~
 	(`fltcmd.command`) See |fltcmd.command|.
@@ -148,14 +155,25 @@ create_injector({cmd}, {valmap})		    *fltcmd.create_injector()*
 		 positions to value keys to replace or inject later.
 
     Return: ~
-	(`fltcmd.injector`) injector object. See |fltcmd.injector|.
+	(`fltcmd.injector`) Injector object. See |fltcmd.injector|.
 
 
 HELPERS							 *fltcmd.nvim-helpers*
 
+flags({flags})						      *fltcmd.flags()*
+    Creates an object that adds {flags} to the command. Flags are options that
+    do not require values from the command line.
+
+    Parameters: ~
+      • {flags}	(`string[]`) Command flags.
+
+    Return: ~
+	(`fltcmd.flags`) Flags object. See |fltcmd.flags|.
+
+
 process_args({cmd}, {args})			       *fltcmd.process_args()*
     Processes the argument list for the specfied command and returns a table 
-    that maps command option to valuei, `true` or the amount of times it was
+    that maps command option to value, `true` or the amount of times it was
     found.
 
     If the processing finds a subcommand it stops there, and creates a special
@@ -166,8 +184,18 @@ process_args({cmd}, {args})			       *fltcmd.process_args()*
       • {args} (`string[]`) The command line arguments.
 
     Return: ~
-	(`table`) a table with the found arguments
+	(`table`) A table with the found arguments.
 
+
+splitline({line}, {_end})				  *fltcmd.splitline()*
+    Splits the given {line} by non escaped space up to {_end}.
+
+    Parameters: ~
+      • {line} (`string`) Line text to split.
+      • {_end} (`integer?`) Last text byte to account into split.
+
+    Return: ~
+	(`string[]`) Split line.
 
 COMPLETION HELPERS			      *fltcmd.nvim-completion-helpers*
 
@@ -193,16 +221,19 @@ choiceof({values})					   *fltcmd.choiceof()*
     Creates a completion source from a list of specific values.
 
     Example: >lua
-	local selector = fltcmd.new_command(function(self, args)
-	    args = fltcmd.process_args(self, args)
-	    print(args[1])
-	end, { fltcmd.choiceof({'help', 'with', 'examples'}) })
+	local selectorcomp = fltcmd.create_completer({
+	    fltcmd.choiceof({'help', 'with', 'examples'})
+	})
 
-	local choices = fltcmd.create_completer(selector)('', 'select ', 7)
+	local choices = selectorcomp('', 'select ', 7)
 	vim.print(choices) -- will print { 'help', 'with', 'examples' }
 <
     Parameters: ~
       • {values}  (`any[]`) A list of values to complete from.
+
+    Overloads: ~
+	• `fun(fun():any[]):fltcmd.comp` Generates the completion from a
+				       value generator function.
 
     Return: ~
 	(`fltcmd.comp`) Customlist completion function. See |fltcmd.comp|.
