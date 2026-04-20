@@ -4,6 +4,7 @@ local space = string.byte(' ')
 --- Splits the line by non-escaped space, last item may be empty
 ---@param line string Line to split
 ---@param _end? integer End byte to accout for split
+---@return string[]
 local function split(line, _end)
 	_end = _end or #line
 	if line:byte(_end) == bslash and line:byte(_end + 1) == space then
@@ -73,8 +74,26 @@ end
 
 local M = {}
 
+---@alias fltcmd._comp_std fun(lead: string, arg: any, pos: integer, count: table):string[]
+---@alias fltcmd._comp_arg fun(lead:nil, arg:nil, pos:nil, what:true):integer
+---@alias fltcmd._comp_flg fun(lead:nil, arg:nil, pos:nil, what:string):boolean
+
+---@alias fltcmd._comp fltcmd._comp_std|fltcmd._comp_arg|fltcmd._comp_flg
+
 local ctxcache = setmetatable({}, { __mode = 'k' })
+
+local function c_count(v)
+	if v == '...' then
+		return math.huge
+	elseif type(v) == 'number' then
+		return v
+	else
+		return 1
+	end
+end
+
 ---@param cmd fltcmd.command
+---@return fltcmd._comp
 local function new_ctx(cmd)
 	if ctxcache[cmd] then
 		return ctxcache[cmd]
@@ -138,11 +157,14 @@ local function new_ctx(cmd)
 	table.sort(cmdlist)
 
 	---@class fltcmd.completer
-	local _CMP = {}
-	function _CMP:__call(lead, arg, pos, what)
+	local X = {}
+	function X:__call(lead, arg, pos, what)
+		-- get max positional arguments
 		if what == true then
 			return maxargs
 		end
+
+		-- checks that given flag is defined
 		if type(what) == 'string' then
 			if vim.startswith(what, '-') then
 				for _, v in ipairs(cmdlist) do
@@ -153,6 +175,8 @@ local function new_ctx(cmd)
 			end
 			return false
 		end
+
+		-- normal flow, gets candidates
 
 		local candidates = {}
 		---@type boolean|nil
@@ -168,8 +192,11 @@ local function new_ctx(cmd)
 		elseif pos > 0 then
 			return {}
 		end
+
+		local count = what
+
 		-- commands or options with completion, add candidates when required
-		if type(arg) == 'string' and self[arg] then
+		if type(arg) == 'string' and self[arg] and count[arg] == 1 then
 			vim.list_extend(candidates, self[arg](lead))
 			addopts = addopts or nil
 		end
@@ -182,6 +209,7 @@ local function new_ctx(cmd)
 			if
 				(addopts or not vim.startswith(c, '-'))
 				and vim.startswith(c, lead)
+				and count[c] < c_count(cmd[c])
 			then
 				candidates[#candidates + 1] = c
 			end
@@ -190,9 +218,19 @@ local function new_ctx(cmd)
 		return candidates
 	end
 
-	ctxcache[cmd] = setmetatable(compdef, _CMP)
+	---@overload fun(lead: string, arg: string|table|function, pos:integer):string[]
+	---@overload fun(lead: nil, arg: nil, pos:nil, what:true):integer
+	---@overload fun(lead: nil, arg: nil, pos:nil, what:string):boolean
+	---@diagnostic disable-next-line: assign-type-mismatch
+	ctxcache[cmd] = setmetatable(compdef, X)
 	return ctxcache[cmd]
 end
+
+local CT = {
+	__index = function()
+		return 0
+	end,
+}
 
 local completercache = setmetatable({}, { __mode = 'k' })
 
@@ -211,15 +249,18 @@ function M.create_completer(cmd)
 		cmdargs[#cmdargs] = nil
 
 		local comp = ctx
+		local count = setmetatable({}, CT)
 		local maxarg = comp(nil, nil, nil, true)
 		local posarg = math.min(1, maxarg)
 		local lastc
 		for i = 1, #cmdargs do
 			local p = cmdargs[i]
 			local c = comp[p]
+			count[p] = count[p] + 1
 			if type(c) == 'table' then
-				comp = c
 				lastc = c
+				---@cast c fltcmd._comp
+				comp = c
 				maxarg = comp(nil, nil, nil, true)
 				posarg = math.min(1, maxarg)
 			elseif c then
@@ -233,7 +274,7 @@ function M.create_completer(cmd)
 			end
 		end
 
-		return comp(lead, lastc, posarg)
+		return comp(lead, lastc, posarg, count)
 	end
 
 	return completercache[cmd]
@@ -246,6 +287,7 @@ IR.__index = {}
 --- Updates the command line with the specified values.
 ---@param values table<string, string> The value map to use.
 ---@return string[] cmdline This objects cmdline.
+---@diagnostic disable-next-line: duplicate-set-field
 function IR:inject(values)
 	self.existing = vim.tbl_extend('force', self.existing, values or {})
 
@@ -300,6 +342,7 @@ function M.create_injector(cmd, valmap)
 			local p = cmdline[i]
 			local c = comp[p]
 			if type(c) == 'table' then
+				---@cast c fltcmd._comp
 				comp = c
 				argi = 1
 				posarg = false

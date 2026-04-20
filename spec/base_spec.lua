@@ -34,7 +34,9 @@ describe('commands', function()
 		})
 
 		it('bad arguments call', function()
-			assert.has.error(c, 'args: expected table, got nil')
+			assert.has.error(function()
+				c()
+			end, 'args: expected table, got nil')
 			assert.has.error(function()
 				c('arg')
 			end, 'args: expected table, got string')
@@ -202,14 +204,44 @@ describe('commands', function()
 			fltcmd.any,
 			'...',
 		})
-		local function compl(str, pos)
+		local function comp(str, pos)
 			local splt = fltcmd.splitline(str, pos)
 			return c(splt[#splt], str, pos or #str)
 		end
 
-		assert.same({ '-f', '-o', '-r', '-v' }, compl('c -'))
-		assert.same({ '-f', '-o', '-r', '-v' }, compl('c - data', 4))
-		assert.same({}, compl('c - data da'))
-		assert.same({ '-o' }, compl('c -o data', 4))
+		assert.same({ '-f', '-o', '-r', '-v' }, comp('c -'))
+		assert.same({ '-f', '-o', '-r', '-v' }, comp('c - data', 4))
+		assert.same({}, comp('c - data da'))
+		assert.same({ '-o' }, comp('c -o data', 4))
+	end)
+end)
+
+describe('completion', function()
+	---@module 'fltcmd'
+	local fltcmd
+	setup(function()
+		fltcmd = require('fltcmd')
+	end)
+
+	teardown(function()
+		fltcmd = nil
+	end)
+
+	it('tracks flag usage', function()
+		local c = fltcmd.create_completer({
+			['-f'] = true,
+			['-v'] = 4,
+		})
+		local function comp(str, pos)
+			local splt = fltcmd.splitline(str, pos)
+			return c(splt[#splt], str, pos or #str)
+		end
+
+		assert.same({ '-f', '-v' }, comp('c '))
+		assert.same({ '-f', '-v' }, comp('c -v '))
+		assert.same({ '-f', '-v' }, comp('c -v -v '))
+		assert.same({ '-f', '-v' }, comp('c -v -v -v '))
+		assert.same({ '-f' }, comp('c -v -v -v -v '))
+		assert.same({}, comp('c -v -v -f -v -v '))
 	end)
 end)
