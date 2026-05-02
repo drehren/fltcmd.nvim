@@ -1,163 +1,199 @@
 ---@meta fltcmd
 
---- Command completion
+---Command completion.
 ---@alias fltcmd.comp fun(lead: string, cmdline: string, pos: integer):string[]
 
---- Defines how an automatic command should complete
----@class fltcmd.basedef
+---Defines how an automatic command should complete.
+---@class fltcmd.cmddef
 ---@field [string] fltcmd.command
 
---- Defines how a command should complete
----@class fltcmd.def : fltcmd.basedef
----@field [integer] fltcmd.comp|'...'
----@field [string] fltcmd.command|fltcmd.comp|boolean|integer
+---Defines how a command should complete.
+---@class fltcmd.def : fltcmd.cmddef
+---@field [integer] fltcmd.comp|'...'|fltcmd.flags
+---@field [string] fltcmd.def|fltcmd.command|fltcmd.multiple|fltcmd.comp|integer|boolean
+---@field ['...'] fltcmd.comp
 
---- Represents a single command
----@class fltcmd.command
+---Represents a callable command.
+---@class fltcmd.command : fltcmd.cmddef
+---Calls the command using the specified argument list.
 ---@operator call(string[]):any
-local C = {}
 
---- Represents a collection of flags for a command
+---A collection of flags for a command.
 ---@class fltcmd.flags
-local F = {}
 
+---Represents an option that can be used more than once.
+---@class fltcmd.multiple
+
+---Map of option names to value names.
 ---@class fltcmd.valmap
 ---@field [string] table<string|integer, string>
 
---- Allows values for parameters to be injected into command line.
+---Allows values for parameters to be injected into command line.
 ---@class fltcmd.injector
---- Processes the `cmdline` to get parameters to be replaced.
+---Processes the `cmdline` to get parameters to be replaced.
 ---@field process fun(cmdline:string[]): fltcmd.injector_result
 
---- Result of processing a `cmdline` against an injector.
+---Result of processing a `cmdline` against an injector.
 ---@class fltcmd.injector_result
---- Command line processed.
+---Command line processed.
 ---@field cmdline string[]
---- Existing named values in the command line.
+---Existing named values in the command line.
 ---@field existing table<string, string>
---- Possible named values
+---Possible named values
 ---@field missing table
 local IR = {}
 
---- Updates the command line with the specified values.
+---Updates the command line with the specified values.
 ---@param values table<string, string> The value map to use.
 ---@return string[] cmdline This objects cmdline.
 function IR:inject(values) end
 
 local M = {}
 
---- Creates a new command, calls the specified function.
+---Creates a new command, calls the specified function.
 ---@param fn fun(self: fltcmd.command, args: string[], opts?: vim.api.keyset.create_user_command.command_args):any
 ---@param def? fltcmd.def Command definition
 ---@return fltcmd.command command
 function M.new_command(fn, def) end
 
---- Creates a new command, which calls one of the defined sub commands.
----@param def fltcmd.basedef
+---Creates a new command, which calls one of the defined sub commands.
+---@param def fltcmd.cmddef
 ---@return fltcmd.command command
 function M.new_command(def) end
 
---- Creates an command completion customlist function from the specified command.
+---Creates a command completion customlist function from the specified command.
 ---@param cmd fltcmd.command A command to create the completion from
 ---@return fltcmd.comp completer Completion function
 function M.create_completer(cmd) end
 
---- Creates an injector object that can process a command line to extract
---- existing values and inject new ones to the specified options.
+---Creates a completion customlist function from the specified definition.
+---@param def fltcmd.def The definition to use
+---@return fltcmd.comp completer Completion function
+function M.create_completer(def) end
+
+---Creates an injector object that can process a command line to extract
+---existing values and inject new ones to the specified options.
 ---@param cmd fltcmd.command Command to use.
 ---@param valmap fltcmd.valmap Value map to define option values.
 ---@return fltcmd.injector injector Injector object.
 function M.create_injector(cmd, valmap) end
 
---- Creates an `user-commands` comamnd that calls `cmd`
+---Creates an `user-commands` comamnd that calls `cmd`
 ---@param name string Name of the new command.
 ---@param cmd fltcmd.command Command to execute.
 ---@param opts? vim.api.keyset.user_command Optional flags
 function M.create_user_command(name, cmd, opts) end
 
---- Processes the argument list for the specfied command and returns a table
---- that maps command option to value or existence.
+---Contains the arguments found for a command.
+---@class fltcmd.arguments
+---@field [integer] string
+---@field [string] true|integer|string|string[]
+---@field [fltcmd.command] string[]
+
+---Processes the argument list for the specfied command and returns a table
+---that maps command option to value or existence.
 ---
---- If the processing find a subcommand it stops there, and creates a special
---- function that will pass the rest of the argument list.
+---If the processing finds a subcommand it stops and puts the rest of the
+---arguments as value for the subcommand.
 ---@param cmd fltcmd.command The command.
 ---@param args string[] The command arguments.
----@return table<string|integer, boolean|number|function>
+---@return fltcmd.arguments
 function M.process_args(cmd, args) end
 
---- Splits the line by non-escaped space, last item may be empty
+---Processes the argument list for the specfied command and returns a table
+---that maps command option to value or existence.
+---
+---If the processing finds a subcommand it stops and puts the rest of the
+---arguments as value for the subcommand.
+---@param def fltcmd.def A completion definition
+---@param args string[] The arguments.
+---@return fltcmd.arguments
+function M.process_args(def, args) end
+
+---Splits the line by non-escaped space, last item may be empty
 ---@param line string Line to split
 ---@param _end? integer End byte to accout for split
 ---@return string[]
 function M.splitline(line, _end) end
 
---- Completes to an empty list.
---- Useful to mark entries that require unknown input.
+---Completes to an empty list.
+---Useful to mark entries that require unknown input.
+---@type fltcmd.comp
 ---@return table
 function M.any() end
 
---- Creates a completion source from a list of specific values.
+---Creates a completion source from a list of specific values.
 ---@param values any[] Available values.
 ---@return fun(lead:string):string[]
 function M.choiceof(values) end
 
---- Creates a completion source from a function that generates a list of values.
+---Creates a completion source from a function that generates a list of values.
 ---@param fn fun():any[] Values generator function.
 ---@return fun(lead:string):string[]
 function M.choiceof(fn) end
 
 ---@alias fltcmd.getcompletion.type
---- | 'arglist'
---- | 'augroup'
---- | 'buffer'
---- | 'breakpoint'
---- | 'cmdline'
---- | 'color'
---- | 'command'
---- | 'compiler'
---- | 'diff_buffer'
---- | 'dir'
---- | 'dir_in_path'
---- | 'environment'
---- | 'event'
---- | 'expression'
---- | 'file'
---- | 'file_in_path'
---- | 'filetype'
---- | 'filetypecmd'
---- | 'function'
---- | 'help'
---- | 'highlight'
---- | 'history'
---- | 'keymap'
---- | 'locale'
---- | 'mapclear'
---- | 'mapping'
---- | 'menu'
---- | 'messages'
---- | 'option'
---- | 'packadd'
---- | 'retab'
---- | 'runtime'
---- | 'scriptnames'
---- | 'shellcmd'
---- | 'shellcmdline'
---- | 'sign'
---- | 'syntax'
---- | 'syntime'
---- | 'tag'
---- | 'tag_listfiles'
---- | 'user'
---- | 'var'
+---| 'arglist'
+---| 'augroup'
+---| 'buffer'
+---| 'breakpoint'
+---| 'cmdline'
+---| 'color'
+---| 'command'
+---| 'compiler'
+---| 'diff_buffer'
+---| 'dir'
+---| 'dir_in_path'
+---| 'environment'
+---| 'event'
+---| 'expression'
+---| 'file'
+---| 'file_in_path'
+---| 'filetype'
+---| 'filetypecmd'
+---| 'function'
+---| 'help'
+---| 'highlight'
+---| 'history'
+---| 'keymap'
+---| 'locale'
+---| 'mapclear'
+---| 'mapping'
+---| 'menu'
+---| 'messages'
+---| 'option'
+---| 'packadd'
+---| 'retab'
+---| 'runtime'
+---| 'scriptnames'
+---| 'shellcmd'
+---| 'shellcmdline'
+---| 'sign'
+---| 'syntax'
+---| 'syntime'
+---| 'tag'
+---| 'tag_listfiles'
+---| 'user'
+---| 'var'
 
---- Creates a completion source using getcompletion() function.
+---Creates a completion source using getcompletion() function.
 ---@param type fltcmd.getcompletion.type
 ---@return fun(lead:string):string[]
 function M.getcompletion(type) end
 
---- Defines flags (non-valued options) for command.
+---Defines flags (non-valued options) for command.
 ---@param flags string[] Command flag list.
 ---@return fltcmd.flags flag_bag
 function M.flags(flags) end
+
+---Enables an option to be defined zero to `n` times.
+---@param n integer|'...' The amount of times this option can appear.
+---@param completer fun(lead: string): string[] Option parameter completer.
+---@return fltcmd.multiple
+function M.multiple(n, completer) end
+
+---Enables an option to be defined zero or more times.
+---@param completer fun(lead: string): string[] Option parameter completer.
+function M.multiple(completer) end
 
 return M

@@ -1,3 +1,4 @@
+---@diagnostic disable: duplicate-set-field
 local bslash = string.byte('\\')
 local space = string.byte(' ')
 
@@ -42,36 +43,37 @@ local function split(line, _end)
 	return ln
 end
 
+local function create_is_mt(MT)
+	return function(v)
+		if type(v) == 'table' then
+			local mt = getmetatable(v)
+			while mt and mt ~= MT do
+				mt = getmetatable(mt)
+			end
+			return mt == MT
+		end
+		return false
+	end
+end
+
 --- Represents a single command
 ---@class fltcmd.command
 local C = {}
+
+local is_cmd = create_is_mt(C)
 
 --- Represents a collection of flags for a command
 ---@class fltcmd.flags
 local F = {}
 
-local function is_def(v)
-	if type(v) == 'table' then
-		local mt = getmetatable(v)
-		while mt and mt ~= C do
-			mt = getmetatable(mt)
-		end
-		return mt == C
-	end
-	return false
-end
+local is_flags = create_is_mt(F)
 
-local function is_flags(v)
-	if type(v) == 'table' then
-		local mt = getmetatable(v)
-		while mt and mt ~= F do
-			mt = getmetatable(mt)
-		end
-		return mt == F
-	end
-	return false
-end
+---@class fltcmd.multiple
+local O = {}
 
+local is_mult = create_is_mt(O)
+
+---@module 'fltcmd'
 local M = {}
 
 ---@alias fltcmd._comp_std fun(lead: string, arg: any, pos: integer, count: table):string[]
@@ -87,6 +89,8 @@ local function c_count(v)
 		return math.huge
 	elseif type(v) == 'number' then
 		return v
+	elseif is_mult(v) then
+		return v[1]
 	else
 		return 1
 	end
@@ -113,6 +117,10 @@ local function new_ctx(cmd)
 			else
 				compdef[maxargs + 1] = v
 			end
+		end
+
+		if is_mult(v) then
+			v = v[2]
 		end
 
 		if v == '...' then
@@ -150,6 +158,7 @@ local function new_ctx(cmd)
 	for _, fls in ipairs(flags) do
 		table.remove(cmd, fls[1])
 		for _, f in ipairs(fls[2]) do
+			---@diagnostic disable-next-line: assign-type-mismatch
 			cmd[f] = true
 		end
 	end
@@ -196,7 +205,11 @@ local function new_ctx(cmd)
 		local count = what
 
 		-- commands or options with completion, add candidates when required
-		if type(arg) == 'string' and self[arg] and count[arg] == 1 then
+		if
+			type(arg) == 'string'
+			and self[arg]
+			and count[arg] <= c_count(cmd[arg])
+		then
 			vim.list_extend(candidates, self[arg](lead))
 			addopts = addopts or nil
 		end
@@ -402,7 +415,7 @@ end
 --- Creates a new command
 ---@param fn fun(self: fltcmd.command, args: string[], opts?: vim.api.keyset.create_user_command.command_args)
 ---@param def? fltcmd.def Command definition
----@overload fun(def: fltcmd.basedef): fltcmd.command
+---@overload fun(def: fltcmd.cmddef): fltcmd.command
 ---@return fltcmd.command
 function M.new_command(fn, def)
 	if not vim.is_callable(fn) and not def then
@@ -416,7 +429,7 @@ function M.new_command(fn, def)
 			if type(k) ~= 'string' then
 				error('definition: expects string keys only')
 			end
-			if not is_def(v) then
+			if not is_cmd(v) then
 				error('definition.' .. k .. ': expected command')
 			end
 		end
@@ -435,43 +448,81 @@ function M.new_command(fn, def)
 	return setmetatable(def, mt)
 end
 
---- Processes the argument list for the specfied command and returns a table
---- that maps command option to value or existence.
----
---- If the processing find a subcommand it stops there, and creates a special
---- function that will pass the rest of the argument list.
----@param cmd fltcmd.command
----@param args string[]
----@return table<string|integer, boolean|number|function>
+local function assert_argument(cmd, opt, arg)
+	if arg and not vim.startswith(arg, '-') then
+		return
+	end
+	if not arg then
+		error(opt .. ': expected argument', 2)
+	elseif cmd[arg] then
+		error(opt .. ': "' .. arg .. '" is not expected', 2)
+	end
+end
+
 function M.process_args(cmd, args)
+	vim.validate('cmd', cmd, 'table')
+	vim.validate('args', args, 'table')
+
+	-- get unprocessed flags here
+	local flagbags = 0
+	local flags = {}
+	for _, v in ipairs(cmd) do
+		if is_flags(v) then
+			---@cast v fltcmd.flags
+			flagbags = flagbags + 1
+			for _, f in ipairs(v) do
+				flags[f] = true
+			end
+		end
+	end
+
+	local maxarg = #cmd - flagbags
+	if cmd['...'] or cmd[#cmd] == '...' then
+		maxarg = math.huge
+	end
 	local pargs = {}
 	local i = 1
 	while i <= #args do
 		local v = args[i]
 		i = i + 1
-		local dvt = type(cmd[v])
+		local dvt = type(cmd[v] or flags[v])
 		if dvt == 'string' or dvt == 'function' then
+			assert_argument(cmd, v, args[i])
 			pargs[v] = args[i]
-			if pargs[v] then
-				i = i + 1
-			end
+			i = i + 1
 		elseif dvt == 'table' then
-			if is_def(cmd[v]) then
-				pargs[v] = function(subargs)
-					assert(subargs == args)
-					subargs = vim.list_slice(subargs, i)
-					cmd[v](subargs)
+			if is_mult(cmd[v]) then
+				if not pargs[v] then
+					pargs[v] = {}
 				end
-				break
+				local total = 0
+				while #pargs[v] < cmd[v][1] do
+					if total == 0 then
+						assert_argument(cmd, v, args[i])
+					elseif
+						not args[i]
+						or cmd[args[i]] and vim.startswith(args[i], '-')
+					then
+						break
+					end
+					table.insert(pargs[v], args[i])
+					i = i + 1
+					total = total + 1
+				end
 			else
-				pargs[v] = cmd[v]
+				pargs[cmd[v]] = vim.list_slice(args, i)
+				break
 			end
 		elseif dvt == 'number' then
+			---@diagnostic disable-next-line: param-type-mismatch cmd[v] is number here
 			pargs[v] = math.min((pargs[v] or 0) + 1, cmd[v])
 		elseif dvt == 'boolean' then
 			pargs[v] = true
-		elseif cmd[#pargs + 1] or cmd['...'] then
+		elseif #pargs < maxarg then
 			pargs[#pargs + 1] = v
+			if #pargs == maxarg then
+				break
+			end
 		end
 	end
 
@@ -541,6 +592,25 @@ end
 function M.flags(flags)
 	vim.validate('flags', flags, 'table')
 	return setmetatable(flags, F)
+end
+
+---@param times integer|'...'
+---@param completer fun(lead: string): string[]
+---@return fltcmd.multiple
+function M.multiple(times, completer)
+	local function timeval(v)
+		if type(v) == 'number' then
+			return v > 0
+		else
+			return v == '...'
+		end
+	end
+
+	vim.validate('completer', completer, 'callable')
+	vim.validate('times', times, timeval, 'positive integer or "..."')
+
+	local range = times == '...' and math.huge or times
+	return setmetatable({ range, completer }, O)
 end
 
 M.splitline = split

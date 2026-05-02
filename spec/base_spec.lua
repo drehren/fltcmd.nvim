@@ -1,29 +1,19 @@
 ---@module "luassert"
 ---@module "busted"
 
-describe('commands', function()
+describe('call', function()
 	---@module 'fltcmd'
 	local fltcmd
 
 	setup(function()
-		local ok
-		ok, fltcmd = pcall(require, 'fltcmd')
-		if not ok then
-			-- add to path
-			local p = (function()
-				return debug.getinfo(2, 'S').source
-			end)()
-			p = vim.fs.dirname(vim.fs.dirname(p))
-			vim.opt.rtp:append(p)
-			fltcmd = require('fltcmd')
-		end
+		fltcmd = require('fltcmd')
 	end)
 
 	teardown(function()
 		fltcmd = nil
 	end)
 
-	describe('simple subcommand-only command', function()
+	describe('commands', function()
 		local c = fltcmd.new_command({
 			sub1 = fltcmd.new_command(function()
 				return 'sub1'
@@ -60,6 +50,11 @@ describe('commands', function()
 		it('using correct commands', function()
 			assert.equal('sub1', c({ 'sub1' }))
 			assert.equal('sub2', c({ 'sub2' }))
+		end)
+
+		it('subcommands can be reached as well', function()
+			assert.equal('sub1', c.sub1({}))
+			assert.equal('sub2', c.sub2({}))
 		end)
 	end)
 
@@ -100,9 +95,7 @@ describe('commands', function()
 	end)
 
 	describe('argument processing', function()
-		local c = fltcmd.new_command(function(c, args)
-			return fltcmd.process_args(c, args)
-		end, {
+		local c = fltcmd.new_command(fltcmd.process_args, {
 			['--file'] = fltcmd.any,
 			['-v'] = 3,
 			['-r'] = true,
@@ -115,35 +108,7 @@ describe('commands', function()
 		assert.same({ ['-r'] = true }, c({ '-r', '-r', 'arg' }))
 	end)
 
-	it('split line', function()
-		assert.same({ 'hello', 'world' }, fltcmd.splitline('hello world'))
-		assert.same({ 'hello\\ ', 'world' }, fltcmd.splitline('hello\\  world'))
-
-		--                    1         2         3 3
-		--           1        0         0         0 2
-		local ln = [[hello\ to\ all  how is it going?]]
-
-		local getlast = function(l, n)
-			local r = fltcmd.splitline(l, n)
-			return r[#r]
-		end
-
-		assert.same('h', getlast(ln, 1))
-		assert.same('hello\\ ', getlast(ln, 6))
-		assert.same('hello', getlast(ln, 5))
-		assert.same('hell', getlast(ln, 4))
-		assert.same('ho', getlast(ln, 18))
-		assert.same('go', getlast(ln, 28))
-		assert.same('going?', getlast(ln, 33))
-		assert.same('', getlast(ln, 15))
-		assert.same('', getlast(ln, 20))
-		assert.same('', getlast(ln, 26))
-		assert.same('', getlast('    ', 2))
-		assert.same('he', getlast('hello', 2))
-		assert.same('hell', getlast('hello', 4))
-	end)
-
-	it('check completion', function()
+	it('completion', function()
 		local c = fltcmd.create_completer({
 			testa = {
 				['-c'] = fltcmd.getcompletion('file'),
@@ -243,5 +208,24 @@ describe('completion', function()
 		assert.same({ '-f', '-v' }, comp('c -v -v -v '))
 		assert.same({ '-f' }, comp('c -v -v -v -v '))
 		assert.same({}, comp('c -v -v -f -v -v '))
+	end)
+
+	it('allows option multiple times', function()
+		local c = fltcmd.create_completer({
+			['-e'] = fltcmd.multiple(3, fltcmd.choiceof({ 1, 2, 3 })),
+			fltcmd.flags({ '-v', '-h' }),
+			fltcmd.choiceof({ 'file1.txt', 'file2.txt' }),
+		})
+
+		local function comp(str, pos)
+			local splt = fltcmd.splitline(str, pos)
+			return c(splt[#splt], str, pos or #str)
+		end
+
+		assert.same({ '-e', '-h', '-v' }, comp('c '))
+		assert.same({ 1, 2, 3 }, comp('c -e '))
+		assert.same({ 1, 2, 3 }, comp('c -e 1 -e '))
+		assert.same({ 1, 2, 3 }, comp('c -e 1 -e 2 -e '))
+		assert.same({ '-h', '-v' }, comp('c -e 1 -e 2 -e 3 '))
 	end)
 end)

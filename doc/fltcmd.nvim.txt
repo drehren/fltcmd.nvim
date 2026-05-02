@@ -35,7 +35,7 @@ OBJECTS
 
 *fltcmd.cmddef*
     A table that maps names to subcommands. Completion is created based on the
-    commands used. Requires at least one command definition.
+    commands used.
 
     Fields ~
       • {string}  (`fltcmd.command`) Defines a command. See |fltcmd.command|.
@@ -54,7 +54,8 @@ OBJECTS
 *fltcmd.command*
     A command line-like callable object.
 
-    The object expects a string argument list as parameter. See |fltcmd.command()|.
+    The object expects a string argument list as parameter. See
+    |fltcmd.command()|.
 
 fltcmd.command({self}, {args}, {opts})			    *fltcmd.command()*
     Invokes the command.
@@ -117,9 +118,8 @@ new_command({fn}, {def})				*fltcmd.new_command()*
       • {def}  (`fltcmd.def`) Command argument definition. See |fltcmd.def|.
 
     Overloads: ~
-      • `fun(def: fltcmd.basedef): fltcmd.command` Creates a new command from
-						 a subcommand-only command
-						 definition.
+    • `fun(def: fltcmd.cmddef):fltcmd.command` Creates a new command from
+					     a subcommand-only definition.
     
     Return: ~
 	(`fltcmd.command`) See |fltcmd.command|.
